@@ -9,6 +9,7 @@ import sys
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from zclaw.llm import VLLMChatModel
+from zclaw.tool_loop import run_tool_loop
 from zclaw.workspace import build_system_prompt_with_workspace, build_workspace_digest
 
 
@@ -24,7 +25,7 @@ def _cmd_digest(args: argparse.Namespace) -> int:
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
-    base_url = args.base_url or os.environ.get("ZCLAW_VLLM_BASE", "http://127.0.0.1:8000/v1")
+    base_url = args.base_url or os.environ.get("ZCLAW_VLLM_BASE", "http://10.16.86.206:8000/v1")
     model_name = args.model or os.environ.get("ZCLAW_MODEL", "Qwen/Qwen2.5-7B")
 
     system_text = build_system_prompt_with_workspace(
@@ -53,6 +54,40 @@ def _cmd_chat(args: argparse.Namespace) -> int:
         if c:
             print(c, end="", flush=True)
     print("\n")
+    return 0
+
+
+def _cmd_tools_run(args: argparse.Namespace) -> int:
+    """两阶段：模型输出工具 JSON → 本地执行 → 模型整合回复。"""
+    base_url = args.base_url or os.environ.get("ZCLAW_VLLM_BASE", "http://10.16.86.206:8000/v1")
+    model_name = args.model or os.environ.get("ZCLAW_MODEL", "Qwen/Qwen2.5-7B")
+    root = args.root
+    if root is None:
+        root = os.environ.get("ZCLAW_WORKSPACE") or os.getcwd()
+    root = os.path.abspath(os.path.expanduser(root))
+
+    llm = VLLMChatModel(
+        base_url=base_url,
+        model_name=model_name,
+        api_key=args.api_key or os.environ.get("ZCLAW_VLLM_API_KEY", "token-abc123"),
+        max_tokens=args.max_tokens,
+    )
+    result = run_tool_loop(
+        llm,
+        args.message,
+        default_root_dir=root,
+        stage1_max_tokens=args.stage1_tokens,
+        stage2_max_tokens=args.stage2_tokens,
+    )
+    if args.verbose:
+        print("----- stage1: tool JSON (raw) -----\n", file=sys.stderr)
+        print(result.tool_call_raw, file=sys.stderr)
+        print("\n----- tool executed -----\n", file=sys.stderr)
+        print(f"tool_name={result.tool_name!r}", file=sys.stderr)
+        out = result.tool_output[:8000] + ("…\n" if len(result.tool_output) > 8000 else "\n")
+        print(out, file=sys.stderr)
+        print("----- stage2: final reply -----\n", file=sys.stderr)
+    print(result.final_reply)
     return 0
 
 
@@ -88,6 +123,38 @@ def main() -> int:
     p_chat.add_argument("--tree-lines", type=int, default=120)
     p_chat.add_argument("--readme-chars", type=int, default=4000)
     p_chat.set_defaults(func=_cmd_chat)
+
+    p_tools = sub.add_parser(
+        "tools-run",
+        help="Tool JSON → execute get_project_directory / get_file_content → final reply (needs vLLM)",
+    )
+    p_tools.add_argument("--root", **root_kw)
+    p_tools.add_argument("message", help="User instruction")
+    p_tools.add_argument("--base-url", default=None, help="vLLM OpenAPI base")
+    p_tools.add_argument("--model", default=None, help="Model id on the server")
+    p_tools.add_argument("--api-key", default=None, help="Bearer token")
+    p_tools.add_argument("--max-tokens", type=int, default=2048, help="Default max tokens on LLM instance")
+    p_tools.add_argument(
+        "--stage1-tokens",
+        type=int,
+        default=512,
+        dest="stage1_tokens",
+        help="Stage1 completion budget (keep input+output within server context, e.g. 2048)",
+    )
+    p_tools.add_argument(
+        "--stage2-tokens",
+        type=int,
+        default=512,
+        dest="stage2_tokens",
+        help="Stage2 completion budget",
+    )
+    p_tools.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print stage1 JSON and tool output to stderr; stdout is only the final reply",
+    )
+    p_tools.set_defaults(func=_cmd_tools_run)
 
     args = parser.parse_args()
     return args.func(args)

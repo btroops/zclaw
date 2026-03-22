@@ -44,6 +44,8 @@ class VLLMChatModel(BaseChatModel):
     temperature: float = 0.4
     max_tokens: int = 1000
     repetition_penalty: float = 1.1
+    #: If True, send ``repetition_penalty`` in the JSON body (some OpenAI-compatible gateways return 400 on unknown fields).
+    use_repetition_penalty: bool = False
     top_p: float = 0.9
     stop: Optional[List[str]] = None
     request_timeout: int = 120
@@ -90,16 +92,20 @@ class VLLMChatModel(BaseChatModel):
         api_messages = self._convert_to_api_messages(normalized_msgs)
         logger.debug("API messages: %s", api_messages)
 
-        return {
+        payload: Dict[str, Any] = {
             "model": self.model_name,
             "messages": api_messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "top_p": self.top_p,
-            "stop": stop or self.stop or ["<|im_end|>"],
-            "repetition_penalty": self.repetition_penalty,
             "stream": stream,
         }
+        st = stop if stop is not None else self.stop
+        if st:
+            payload["stop"] = st
+        if self.use_repetition_penalty:
+            payload["repetition_penalty"] = self.repetition_penalty
+        return payload
 
     def _stream(
         self,
@@ -123,7 +129,11 @@ class VLLMChatModel(BaseChatModel):
                 stream=True,
                 timeout=self.request_timeout,
             )
-            response.raise_for_status()
+            if not response.ok:
+                body = response.text[:4000]
+                raise RuntimeError(
+                    f"vLLM HTTP {response.status_code} {response.reason}: {body}"
+                )
 
             for line in response.iter_lines(decode_unicode=True):
                 if not line:
