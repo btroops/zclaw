@@ -97,7 +97,11 @@ def main() -> int:
 
     root_kw = dict(
         default=None,
-        help="Workspace root (default: $ZCLAW_WORKSPACE or cwd)",
+        help=(
+            "本会话的工程根目录：相对路径（如 llm、src/zclaw）会拼在此路径下；"
+            "提示词里的「默认工程根」也是它。默认先读 $ZCLAW_WORKSPACE，否则用当前工作目录。"
+            "可指向任意工程路径，不必是 zclaw_demo 仓库，也不必等于你终端当前 cd 的位置。"
+        ),
     )
 
     p_digest = sub.add_parser("digest", help="Print workspace digest to stdout")

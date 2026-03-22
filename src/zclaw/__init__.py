@@ -7,6 +7,8 @@ from zclaw.tool_loop import (
     build_tool_call_prompt,
     execute_tool_call,
     parse_tool_call,
+    resolve_path,
+    resolve_path_with_meta,
     run_tool_loop,
 )
 from zclaw.tools import get_file_content, get_project_directory
@@ -28,6 +30,8 @@ __all__ = [
     "get_file_content",
     "get_project_directory",
     "parse_tool_call",
+    "resolve_path",
+    "resolve_path_with_meta",
     "resolve_workspace_root",
     "run_tool_loop",
 ]

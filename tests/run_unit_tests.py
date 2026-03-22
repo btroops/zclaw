@@ -76,11 +76,27 @@ class TestToolLoop(unittest.TestCase):
         )
         self.assertIn("/abs/proj", s)
         self.assertIn("hello", s)
+        self.assertIn("相对默认工程根", s)
 
     def test_resolve_path(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             self.assertEqual(resolve_path("sub", str(root)), str((root / "sub").resolve()))
+
+    def test_execute_tool_directory_relative_subdir(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            llm = tmp / "llm"
+            llm.mkdir()
+            (llm / "a.txt").write_text("1", encoding="utf-8")
+            parsed = {
+                "tool_name": "get_project_directory",
+                "tool_params": {"root_dir": "llm", "max_depth": 2},
+                "reason": "t",
+            }
+            name, out = execute_tool_call(parsed, default_root_dir=str(tmp))
+            self.assertEqual(name, "get_project_directory")
+            self.assertIn("a.txt", out)
 
     def test_execute_tool_directory(self) -> None:
         with tempfile.TemporaryDirectory() as d:

@@ -85,6 +85,126 @@ def _format_tree_lines(
     return lines
 
 
+def discover_directories_by_name(
+    workspace_root: str,
+    needle: str,
+    *,
+    max_depth: int = 16,
+    max_results: int = 25,
+) -> List[str]:
+    """
+    Walk ``workspace_root`` (depth-limited) and return absolute paths of directories
+    whose name matches ``needle`` case-insensitively (exact name, then substring).
+    Skips the same hidden / cache directories as the tree tool.
+    """
+    root = Path(workspace_root).expanduser().resolve()
+    if not root.is_dir():
+        return []
+    n = needle.strip()
+    if not n or n in (".", ".."):
+        return []
+    nf = n.casefold()
+    exclude = _normalize_exclude(None)
+    scored: List[tuple[int, int, str]] = []
+
+    def score_dirname(dname: str) -> Optional[int]:
+        dfc = dname.casefold()
+        if dfc == nf:
+            return 0
+        if nf in dfc:
+            return 1
+        if len(dname) >= 2 and dfc in nf:
+            return 2
+        return None
+
+    stack: List[tuple[Path, int]] = [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            continue
+        try:
+            for child in sorted(current.iterdir(), key=lambda p: p.name.lower()):
+                if not child.is_dir():
+                    continue
+                if _should_skip_dir(child.name, exclude):
+                    continue
+                sc = score_dirname(child.name)
+                if sc is not None:
+                    resolved = str(child.resolve())
+                    scored.append((sc, len(resolved), resolved))
+                if depth < max_depth:
+                    stack.append((child, depth + 1))
+        except OSError:
+            continue
+
+    scored.sort(key=lambda t: (t[0], t[1]))
+    out: List[str] = []
+    seen: set[str] = set()
+    for _, _, pth in scored:
+        if pth in seen:
+            continue
+        seen.add(pth)
+        out.append(pth)
+        if len(out) >= max_results:
+            break
+    return out
+
+
+def discover_files_by_basename(
+    workspace_root: str,
+    basename: str,
+    *,
+    max_depth: int = 16,
+    max_results: int = 25,
+) -> List[str]:
+    """
+    Walk under ``workspace_root`` and return absolute paths of **files** whose name
+    equals ``basename`` (case-insensitive). Skips the same directories as the tree tool.
+    """
+    root = Path(workspace_root).expanduser().resolve()
+    b = basename.strip()
+    if not root.is_dir() or not b:
+        return []
+    bcf = b.casefold()
+    exclude = _normalize_exclude(None)
+    scored: List[tuple[int, int, str]] = []
+
+    stack: List[tuple[Path, int]] = [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            continue
+        try:
+            for child in sorted(current.iterdir(), key=lambda p: p.name.lower()):
+                if child.is_dir():
+                    if _should_skip_dir(child.name, exclude):
+                        continue
+                    if depth < max_depth:
+                        stack.append((child, depth + 1))
+                elif child.is_file():
+                    n = child.name
+                    if n == b:
+                        rp = str(child.resolve())
+                        scored.append((0, len(rp), rp))
+                    elif n.casefold() == bcf:
+                        rp = str(child.resolve())
+                        scored.append((1, len(rp), rp))
+        except OSError:
+            continue
+
+    scored.sort(key=lambda t: (t[0], t[1]))
+    out: List[str] = []
+    seen: set[str] = set()
+    for _, _, pth in scored:
+        if pth in seen:
+            continue
+        seen.add(pth)
+        out.append(pth)
+        if len(out) >= max_results:
+            break
+    return out
+
+
 def get_project_directory(
     root_dir: str,
     exclude_dirs: Optional[List[str]] = None,

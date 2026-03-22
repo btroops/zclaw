@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zclaw.tools import get_file_content, get_project_directory
+from zclaw.tools import (
+    discover_directories_by_name,
+    discover_files_by_basename,
+    get_file_content,
+    get_project_directory,
+)
 
 
 def test_get_project_directory_smoke(tmp_path: Path) -> None:
@@ -36,3 +41,20 @@ def test_get_file_content_missing() -> None:
 
 def test_get_project_directory_bad_path() -> None:
     assert "错误" in get_project_directory("/nonexistent/dir/zclaw_test_12345")
+
+
+def test_discover_files_by_basename(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    f = tmp_path / "src" / "tools.py"
+    f.write_text("x", encoding="utf-8")
+    hits = discover_files_by_basename(str(tmp_path), "tools.py")
+    assert str(f.resolve()) in hits
+
+
+def test_discover_directories_by_name_casefold(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    z = tmp_path / "src" / "zclaw"
+    z.mkdir()
+    hits = discover_directories_by_name(str(tmp_path), "ZClaw", max_depth=8, max_results=10)
+    assert hits
+    assert str(z.resolve()) in hits
