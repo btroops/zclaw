@@ -1,0 +1,22 @@
+[project]
+name = "zclaw"
+version = "0.1.0"
+description = "ZCLAW demo — Qwen/vLLM chat with workspace awareness"
+requires-python = ">=3.9"
+dependencies = [
+    "langchain-core>=0.3.0",
+    "requests>=2.28.0",
+]
+
+[project.scripts]
+zclaw = "zclaw.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
