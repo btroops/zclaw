@@ -120,7 +120,7 @@ def test_execute_directory_name_discovery_casefold(tmp_path: Path) -> None:
     }
     name, out = execute_tool_call(parsed, default_root_dir=str(tmp_path))
     assert name == "get_project_directory"
-    assert "默认工程根" in out and "mod.py" in out
+    assert "名称检索" in out and "mod.py" in out
 
 
 def test_execute_file_basename_discovery(tmp_path: Path) -> None:

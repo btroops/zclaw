@@ -12,11 +12,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from zclaw.prompts import SECOND_STAGE_PROMPT, TOOL_CALL_PROMPT_OPTIMIZED
-from zclaw.tools import (
-    TOOL_REGISTRY,
-    discover_directories_by_name,
-    discover_files_by_basename,
-)
+from zclaw.path_resolve import resolve_target_directory, resolve_target_file
+from zclaw.tools import TOOL_REGISTRY
 
 
 def _clip_for_context(s: str, max_chars: int) -> str:
@@ -49,7 +46,8 @@ def build_tool_call_prompt(*, default_root_dir: str, user_instruction: str) -> s
         + "\n### 再次强调（路径）\n"
         + "用户只说「某某目录」「某某文件夹」且未写完整路径时，在 JSON 里把 `root_dir` 或 `file_path` 写成"
         + " **相对默认工程根目录** 的路径即可（例如 `llm`、`src/zclaw`、`README.md`）。"
-        + "程序解析顺序为：先默认工程根目录，再当前工作目录（若工程根下不存在同名路径）。\n"
+        + "程序解析顺序为：先**会话默认工程根**（见下文路径），再当前工作目录；"
+        + "多级路径会先逐级解析目录再定位文件。\n"
     )
 
 
@@ -113,12 +111,6 @@ def resolve_path(user_path: str, default_root: str) -> str:
     return resolve_path_with_meta(user_path, default_root)[0]
 
 
-def _is_simple_filename_for_search(path_str: str) -> bool:
-    """No path separators → allow basename search under workspace (e.g. ``tools.py``)."""
-    r = path_str.strip().replace("\\", "/")
-    return bool(r) and "/" not in r
-
-
 def execute_tool_call(
     parsed: Dict[str, Any],
     *,
@@ -141,51 +133,12 @@ def execute_tool_call(
     try:
         if name == "get_project_directory":
             raw_root = params.get("root_dir")
-            root_dir, cwd_fb = resolve_path_with_meta(
-                str(raw_root).strip() if raw_root is not None else "",
-                default_root_dir,
+            raw = str(raw_root).strip() if raw_root is not None else ""
+            root_dir, prefix = resolve_target_directory(
+                default_root_dir, raw, cwd_fallback=True
             )
-            discover_note = ""
-            if not Path(root_dir).is_dir():
-                raw = str(raw_root).strip() if raw_root is not None else ""
-                exp = Path(raw).expanduser() if raw else Path()
-                if raw and not exp.is_absolute():
-                    needle = exp.name if exp.name else raw.rstrip("/").split("/")[-1]
-                    if needle and needle not in (".", ".."):
-                        hits_ws = discover_directories_by_name(
-                            default_root_dir, needle, max_depth=16, max_results=25
-                        )
-                        if len(hits_ws) == 1:
-                            root_dir = hits_ws[0]
-                            discover_note = (
-                                "（路径说明：工程根下无直接路径，已按文件夹名在**默认工程根**内"
-                                "检索到唯一匹配目录。）\n\n"
-                            )
-                        elif len(hits_ws) > 1:
-                            lines = "\n".join(f"- {h}" for h in hits_ws[:20])
-                            return name, (
-                                f"未找到唯一目录「{needle}」（直接路径不存在）。"
-                                f"在默认工程根下检索到多个同名或相近文件夹，请指定完整路径或其一：\n{lines}"
-                            )
-                        else:
-                            hits_cwd: list[str] = []
-                            if Path.cwd().resolve() != Path(default_root_dir).resolve():
-                                hits_cwd = discover_directories_by_name(
-                                    str(Path.cwd()), needle, max_depth=16, max_results=25
-                                )
-                            if len(hits_cwd) == 1:
-                                root_dir = hits_cwd[0]
-                                discover_note = (
-                                    "（路径说明：默认工程根下无此路径且未检索到同名文件夹，"
-                                    "已在**当前工作目录**树下检索到唯一匹配。）\n\n"
-                                )
-                            elif len(hits_cwd) > 1:
-                                lines = "\n".join(f"- {h}" for h in hits_cwd[:20])
-                                return name, (
-                                    f"未找到唯一目录「{needle}」。"
-                                    f"工程根下无匹配，当前工作目录树下有多个候选，请指定其一：\n{lines}"
-                                )
-
+            if root_dir is None:
+                return name, prefix
             exclude = params.get("exclude_dirs")
             md = int(params.get("max_depth", 5))
             out = fn(
@@ -193,66 +146,19 @@ def execute_tool_call(
                 exclude_dirs=exclude,
                 max_depth=md,
             )
-            if discover_note:
-                out = discover_note + out
-            if cwd_fb:
-                out = (
-                    "（路径说明：相对路径在默认工程根下未找到，已使用当前工作目录下的匹配路径。）\n\n"
-                    + out
-                )
-            return name, out
+            return name, prefix + out
         if name == "get_file_content":
             fp = params.get("file_path")
             if fp is None or not str(fp).strip():
                 return name, "错误：未提供 file_path（文件绝对路径或相对默认工程根目录的路径）。"
             raw_fp = str(fp).strip()
-            fp, cwd_fb = resolve_path_with_meta(raw_fp, default_root_dir)
-            discover_note = ""
-            if not Path(fp).is_file() and _is_simple_filename_for_search(raw_fp):
-                exp = Path(raw_fp).expanduser()
-                if not exp.is_absolute():
-                    base = Path(raw_fp).name
-                    if base:
-                        hits_ws = discover_files_by_basename(
-                            default_root_dir, base, max_depth=16, max_results=25
-                        )
-                        if len(hits_ws) == 1:
-                            fp = hits_ws[0]
-                            discover_note = (
-                                "（路径说明：工程根下无此直接路径，已按**文件名**在默认工程根内"
-                                "检索到唯一匹配。）\n\n"
-                            )
-                        elif len(hits_ws) > 1:
-                            lines = "\n".join(f"- {h}" for h in hits_ws[:20])
-                            return name, (
-                                f"未找到唯一文件「{base}」。在默认工程根下有多份同名文件，请指定路径：\n{lines}"
-                            )
-                        else:
-                            hits_cwd: list[str] = []
-                            if Path.cwd().resolve() != Path(default_root_dir).resolve():
-                                hits_cwd = discover_files_by_basename(
-                                    str(Path.cwd()), base, max_depth=16, max_results=25
-                                )
-                            if len(hits_cwd) == 1:
-                                fp = hits_cwd[0]
-                                discover_note = (
-                                    "（路径说明：工程根下无此文件，已在当前工作目录树下"
-                                    "按文件名检索到唯一匹配。）\n\n"
-                                )
-                            elif len(hits_cwd) > 1:
-                                lines = "\n".join(f"- {h}" for h in hits_cwd[:20])
-                                return name, (
-                                    f"工程根下无「{base}」，当前目录树下多个同名文件，请指定其一：\n{lines}"
-                                )
-            out = fn(fp)
-            if discover_note:
-                out = discover_note + out
-            if cwd_fb:
-                out = (
-                    "（路径说明：相对路径在默认工程根下未找到，已使用当前工作目录下的匹配路径。）\n\n"
-                    + out
-                )
-            return name, out
+            path, prefix = resolve_target_file(
+                default_root_dir, raw_fp, cwd_fallback=True
+            )
+            if path is None:
+                return name, prefix
+            out = fn(path)
+            return name, prefix + out
     except Exception as e:  # noqa: BLE001 — surface to model
         return name, f"错误：执行工具 {name} 时异常：{e}"
 

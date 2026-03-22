@@ -1,6 +1,7 @@
 """ZCLAW: local AI assistant demo (vLLM + workspace context)."""
 
 from zclaw.llm import VLLMChatModel
+from zclaw.path_resolve import resolve_target_directory, resolve_target_file
 from zclaw.prompts import SECOND_STAGE_PROMPT, TOOL_CALL_PROMPT_OPTIMIZED
 from zclaw.tool_loop import (
     ToolLoopResult,
@@ -32,6 +33,8 @@ __all__ = [
     "parse_tool_call",
     "resolve_path",
     "resolve_path_with_meta",
+    "resolve_target_directory",
+    "resolve_target_file",
     "resolve_workspace_root",
     "run_tool_loop",
 ]
