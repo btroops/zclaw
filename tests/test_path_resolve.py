@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from zclaw.path_resolve import resolve_target_directory, resolve_target_file
+from zclaw.path_resolve import (
+    resolve_target_directory,
+    resolve_target_file,
+    resolve_under_workspace_write_chain,
+    resolve_write_target_directory,
+    resolve_write_target_file,
+)
 
 
 def test_resolve_multilevel_file_after_directory_chain(tmp_path: Path) -> None:
@@ -31,3 +37,29 @@ def test_resolve_file_tools_basename(tmp_path: Path) -> None:
     f.write_text("x", encoding="utf-8")
     p, _ = resolve_target_file(str(tmp_path), "tools.py")
     assert p == str(f.resolve())
+
+
+def test_resolve_write_target_file_new_under_nested(tmp_path: Path) -> None:
+    (tmp_path / "src" / "zclaw").mkdir(parents=True)
+    p, _ = resolve_write_target_file(str(tmp_path), "src/zclaw/new_file.txt")
+    assert p == str((tmp_path / "src" / "zclaw" / "new_file.txt").resolve())
+
+
+def test_resolve_write_target_directory_new_chain(tmp_path: Path) -> None:
+    p, note = resolve_write_target_directory(str(tmp_path), "a/b/c")
+    assert p == str((tmp_path / "a" / "b" / "c").resolve())
+    assert "将新建" in note
+
+
+def test_resolve_under_workspace_rejects_escape(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    p, err = resolve_under_workspace_write_chain(str(tmp_path), ["..", "outside"])
+    assert p is None
+    assert "越出" in err or "无效" in err
+
+
+def test_resolve_write_rejects_absolute_outside_workspace(tmp_path: Path) -> None:
+    p, err = resolve_write_target_file(str(tmp_path), "/etc/passwd")
+    assert p is None
+    assert "工程根" in err

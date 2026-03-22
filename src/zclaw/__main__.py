@@ -130,7 +130,7 @@ def main() -> int:
 
     p_tools = sub.add_parser(
         "tools-run",
-        help="Tool JSON → execute get_project_directory / get_file_content → final reply (needs vLLM)",
+        help="Tool JSON → execute local tools (directory/file read & write) → final reply (needs vLLM)",
     )
     p_tools.add_argument("--root", **root_kw)
     p_tools.add_argument("message", help="User instruction")
@@ -141,14 +141,14 @@ def main() -> int:
     p_tools.add_argument(
         "--stage1-tokens",
         type=int,
-        default=512,
+        default=256,
         dest="stage1_tokens",
         help="Stage1 completion budget (keep input+output within server context, e.g. 2048)",
     )
     p_tools.add_argument(
         "--stage2-tokens",
         type=int,
-        default=512,
+        default=256,
         dest="stage2_tokens",
         help="Stage2 completion budget",
     )

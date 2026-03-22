@@ -144,3 +144,174 @@ def test_execute_no_tool() -> None:
     )
     assert name is None
     assert "未调用工具" in out
+
+
+def test_execute_create_directory_coerced_to_file_from_user_java_intent(tmp_path: Path) -> None:
+    (tmp_path / "src" / "functest").mkdir(parents=True)
+    parsed = {
+        "tool_name": "create_directory",
+        "tool_params": {"dir_path": "src/functest"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在src/functest目录创建一个HelloWold.java",
+    )
+    assert name == "create_file"
+    assert "工具校正" in out
+    assert (tmp_path / "src" / "functest" / "HelloWold.java").is_file()
+    assert parsed["tool_name"] == "create_file"
+
+
+def test_execute_create_directory_coerced_inline_create_hello_world(tmp_path: Path) -> None:
+    (tmp_path / "src" / "functest").mkdir(parents=True)
+    parsed = {
+        "tool_name": "create_directory",
+        "tool_params": {"dir_path": "src/functest"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在src/functest创建HelloWorld.java",
+    )
+    assert name == "create_file"
+    assert "工具校正" in out
+    assert (tmp_path / "src" / "functest" / "HelloWorld.java").is_file()
+    assert parsed["tool_name"] == "create_file"
+
+
+def test_execute_coerce_create_directory_to_create_file(tmp_path: Path) -> None:
+    (tmp_path / "functest").mkdir()
+    parsed = {
+        "tool_name": "create_directory",
+        "tool_params": {"dir_path": "functest/Hello.java"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在functest目录下创建Hello.java",
+    )
+    assert name == "create_file"
+    assert "工具校正" in out
+    assert (tmp_path / "functest" / "Hello.java").is_file()
+    assert parsed["tool_name"] == "create_file"
+
+
+def test_execute_create_file_aligns_path_and_becomes_write_when_exists(tmp_path: Path) -> None:
+    d = tmp_path / "src" / "functest"
+    d.mkdir(parents=True)
+    target = d / "HelloWold.java"
+    target.write_text("// old\n", encoding="utf-8")
+    parsed = {
+        "tool_name": "create_file",
+        "tool_params": {
+            "file_path": "src/functest/HelloWorld.java",
+            "content": "public class HelloWold {}",
+        },
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在src/functest/HelloWold.java中写快速排序",
+    )
+    assert name == "write_file"
+    assert "路径校正" in out
+    assert "工具校正" in out
+    assert parsed["tool_name"] == "write_file"
+    assert parsed["tool_params"]["file_path"] == "src/functest/HelloWold.java"
+    assert target.read_text(encoding="utf-8") == "public class HelloWold {}"
+
+
+def test_execute_delete_directory_corrects_path(tmp_path: Path) -> None:
+    d = tmp_path / "src" / "functest"
+    d.mkdir(parents=True)
+    parsed = {
+        "tool_name": "delete_directory",
+        "tool_params": {"dir_path": "functest"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在src目录删除functest目录",
+    )
+    assert name == "delete_directory"
+    assert "路径校正" in out
+    assert not d.exists()
+    assert parsed["tool_params"]["dir_path"] == "src/functest"
+
+
+def test_execute_create_directory_corrects_path_from_user_instruction(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    parsed = {
+        "tool_name": "create_directory",
+        "tool_params": {"dir_path": "functest"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(
+        parsed,
+        default_root_dir=str(tmp_path),
+        user_instruction="在src目录下创建一个functest目录",
+    )
+    assert name == "create_directory"
+    assert "路径校正" in out
+    assert (tmp_path / "src" / "functest").is_dir()
+    assert parsed["tool_params"]["dir_path"] == "src/functest"
+
+
+def test_execute_create_directory_and_write_file(tmp_path: Path) -> None:
+    parsed = {
+        "tool_name": "create_directory",
+        "tool_params": {"dir_path": "sub/nested"},
+        "reason": "t",
+    }
+    name, out = execute_tool_call(parsed, default_root_dir=str(tmp_path))
+    assert name == "create_directory"
+    assert "成功" in out
+    assert (tmp_path / "sub" / "nested").is_dir()
+
+    parsed2 = {
+        "tool_name": "write_file",
+        "tool_params": {"file_path": "sub/nested/hello.txt", "content": "hi"},
+        "reason": "t",
+    }
+    name2, out2 = execute_tool_call(parsed2, default_root_dir=str(tmp_path))
+    assert name2 == "write_file"
+    assert "成功" in out2
+    assert (tmp_path / "sub" / "nested" / "hello.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_execute_append_delete_rename(tmp_path: Path) -> None:
+    f = tmp_path / "a.txt"
+    f.write_text("x", encoding="utf-8")
+    ap = {
+        "tool_name": "append_file",
+        "tool_params": {"file_path": "a.txt", "content": "y"},
+        "reason": "t",
+    }
+    n1, o1 = execute_tool_call(ap, default_root_dir=str(tmp_path))
+    assert n1 == "append_file" and "成功" in o1
+    assert f.read_text(encoding="utf-8") == "xy"
+
+    rp = {
+        "tool_name": "rename_file",
+        "tool_params": {"old_path": "a.txt", "new_path": "b.txt"},
+        "reason": "t",
+    }
+    n2, o2 = execute_tool_call(rp, default_root_dir=str(tmp_path))
+    assert n2 == "rename_file" and "成功" in o2
+    assert not f.is_file()
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "xy"
+
+    dp = {
+        "tool_name": "delete_file",
+        "tool_params": {"file_path": "b.txt"},
+        "reason": "t",
+    }
+    n3, o3 = execute_tool_call(dp, default_root_dir=str(tmp_path))
+    assert n3 == "delete_file" and "成功" in o3
+    assert not (tmp_path / "b.txt").exists()

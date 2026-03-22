@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: zclaw
+Version: 0.1.0
+Summary: ZCLAW demo — Qwen/vLLM chat with workspace awareness
+Requires-Python: >=3.9
+Requires-Dist: langchain-core>=0.3.0
+Requires-Dist: requests>=2.28.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"

@@ -1,7 +1,8 @@
-"""Local tools: directory tree and file read (UTF-8)."""
+"""Local tools: directory tree, file read (UTF-8), and workspace-scoped mutations."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -243,7 +244,112 @@ def get_file_content(file_path: str) -> str:
         return f"错误：无法读取文件：{path} ({e})"
 
 
+def create_directory(
+    dir_path: str,
+    *,
+    parents: bool = True,
+    exist_ok: bool = True,
+) -> str:
+    """创建目录（默认递归创建父目录；exist_ok 为 True 时若已存在不报错）。"""
+    p = Path(dir_path).expanduser().resolve()
+    try:
+        p.mkdir(parents=parents, exist_ok=exist_ok)
+        return f"成功：已创建目录（或已存在）：{p}"
+    except OSError as e:
+        return f"错误：无法创建目录：{p} ({e})"
+
+
+def create_file(file_path: str, content: str = "") -> str:
+    """新建 UTF-8 文本文件；若已存在则报错不覆盖。"""
+    p = Path(file_path).expanduser().resolve()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.exists():
+            if p.is_dir():
+                return f"错误：路径已存在且为目录，无法创建同名文件：{p}"
+            return f"错误：文件已存在，未覆盖：{p}"
+        p.write_text(content, encoding="utf-8")
+        return f"成功：已创建文件 {p}（{len(content)} 字符）"
+    except OSError as e:
+        return f"错误：无法创建文件：{p} ({e})"
+
+
+def write_file(file_path: str, content: str) -> str:
+    """写入 UTF-8 文本文件（覆盖已有内容；若父目录不存在则创建）。"""
+    p = Path(file_path).expanduser().resolve()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"成功：已写入文件 {p}（{len(content)} 字符）"
+    except OSError as e:
+        return f"错误：无法写入文件：{p} ({e})"
+
+
+def append_file(file_path: str, content: str) -> str:
+    """向 UTF-8 文本文件末尾追加内容（文件不存在则创建）。"""
+    p = Path(file_path).expanduser().resolve()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(content)
+        return f"成功：已追加到文件 {p}（{len(content)} 字符）"
+    except OSError as e:
+        return f"错误：无法追加文件：{p} ({e})"
+
+
+def delete_file(file_path: str) -> str:
+    """删除文件（仅文件，不删除目录）。"""
+    p = Path(file_path).expanduser().resolve()
+    if not p.is_file():
+        return f"错误：不是文件或不存在：{p}"
+    try:
+        p.unlink()
+        return f"成功：已删除文件 {p}"
+    except OSError as e:
+        return f"错误：无法删除文件：{p} ({e})"
+
+
+def delete_directory(dir_path: str, *, recursive: bool = True) -> str:
+    """
+    删除目录。``recursive=True`` 时删除整棵子树（含非空目录）；为 ``False`` 时仅删除空目录。
+    """
+    p = Path(dir_path).expanduser().resolve()
+    if not p.is_dir():
+        return f"错误：不是目录或不存在：{p}"
+    try:
+        if recursive:
+            shutil.rmtree(p)
+        else:
+            p.rmdir()
+        return f"成功：已删除目录 {p}"
+    except OSError as e:
+        return f"错误：无法删除目录：{p} ({e})"
+
+
+def rename_file(old_path: str, new_path: str) -> str:
+    """重命名或移动文件（目标路径不可已存在）。"""
+    old = Path(old_path).expanduser().resolve()
+    new = Path(new_path).expanduser().resolve()
+    if not old.is_file():
+        return f"错误：源不是文件或不存在：{old}"
+    if new.exists():
+        return f"错误：目标路径已存在：{new}"
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(new)
+        return f"成功：已将 {old} 重命名为 {new}"
+    except OSError as e:
+        return f"错误：无法重命名：{e}"
+
+
 TOOL_REGISTRY: dict[str, Any] = {
     "get_project_directory": get_project_directory,
     "get_file_content": get_file_content,
+    "create_directory": create_directory,
+    "create_file": create_file,
+    "write_file": write_file,
+    "append_file": append_file,
+    "delete_file": delete_file,
+    "delete_directory": delete_directory,
+    "rename_file": rename_file,
 }

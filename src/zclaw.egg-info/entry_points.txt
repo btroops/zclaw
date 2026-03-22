@@ -1,0 +1,2 @@
+[console_scripts]
+zclaw = zclaw.__main__:main

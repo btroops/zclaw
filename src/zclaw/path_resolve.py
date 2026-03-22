@@ -12,6 +12,15 @@ from typing import List, Optional, Tuple
 from zclaw.tools import discover_directories_by_name, discover_files_by_basename
 
 
+def _is_under_workspace(path: Path, workspace: Path) -> bool:
+    """True if ``path`` resolves to a location under ``workspace`` (same as read-side sandbox)."""
+    try:
+        path.resolve().relative_to(workspace.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _split_segments(raw: str) -> List[str]:
     r = raw.strip().replace("\\", "/")
     return [p for p in r.split("/") if p and p != "."]
@@ -207,3 +216,150 @@ def resolve_target_file(
     return None, (
         dir_note + f"错误：在「{parent}」下未找到文件「{fname}」。"
     )
+
+
+def resolve_under_workspace_write_chain(
+    workspace_root: str,
+    segments: List[str],
+) -> Tuple[Optional[Path], str]:
+    """
+    Resolve a directory chain under ``workspace_root`` for **create/write** operations.
+    Trailing segments may point to not-yet-existing directories (literal components).
+    When ``current`` is not an existing directory, fuzzy name search is skipped and
+    only literal ``current/seg`` is used.
+    """
+    ws = Path(workspace_root).expanduser().resolve()
+    if not ws.is_dir():
+        return None, f"错误：会话默认工程根不是目录：{ws}"
+    if not segments:
+        return ws, ""
+
+    current = ws
+    note_parts: list[str] = []
+
+    for seg in segments:
+        if not seg or seg in (".", ".."):
+            return None, f"错误：路径段无效：{seg!r}"
+        direct = (current / seg).resolve()
+        if not _is_under_workspace(direct, ws):
+            return None, f"错误：路径不能越出工程根目录：{direct}"
+        if direct.is_dir():
+            current = direct
+            continue
+        if direct.is_file():
+            return None, (
+                f"错误：路径段「{seg}」对应路径为文件，无法作为目录路径继续：{direct}"
+            )
+        if direct.exists():
+            return None, f"错误：路径存在但类型不是目录：{direct}"
+
+        if current.is_dir():
+            hits_local = discover_directories_by_name(
+                str(current), seg, max_depth=0, max_results=25
+            )
+            if len(hits_local) == 1:
+                current = Path(hits_local[0]).resolve()
+                note_parts.append(f"「{seg}」")
+                continue
+            if len(hits_local) > 1:
+                lines = "\n".join(f"- {h}" for h in hits_local[:15])
+                return None, (
+                    f"路径段「{seg}」在「{current}」下匹配到多个文件夹，请指定完整路径：\n{lines}"
+                )
+
+        literal = (current / seg).resolve()
+        if not _is_under_workspace(literal, ws):
+            return None, f"错误：路径不能越出工程根目录：{literal}"
+        current = literal
+        note_parts.append(f"「{seg}」（将新建）")
+
+    detail = "、".join(note_parts) if note_parts else ""
+    note = (
+        f"（路径说明：部分目录段为新建或名称检索匹配：{detail}。）\n\n" if detail else ""
+    )
+    return current, note
+
+
+def resolve_write_target_file(
+    workspace_root: str,
+    raw: str,
+    *,
+    cwd_fallback: bool = True,
+) -> Tuple[Optional[str], str]:
+    """
+    Resolve a **file** path for create/overwrite/append/rename-destination.
+    The file may not exist yet; parent directory chain follows :func:`resolve_under_workspace_write_chain`.
+    All results stay under ``workspace_root`` (``cwd_fallback`` reserved for API parity with read-side).
+    """
+    _ = cwd_fallback  # writes are anchored to workspace_root only
+    ws = Path(workspace_root).expanduser().resolve()
+    r = raw.strip()
+    if not r:
+        return None, "错误：空文件路径"
+
+    exp = Path(r).expanduser()
+    if exp.is_absolute():
+        p = exp.resolve()
+        if not _is_under_workspace(p, ws):
+            return None, f"错误：绝对路径必须在默认工程根目录内：{ws}"
+        if p.is_dir():
+            return None, f"错误：路径是目录而非文件：{p}"
+        return str(p), ""
+
+    segments = _split_segments(r)
+    if not segments:
+        return None, "错误：空文件路径"
+    fname = segments[-1]
+    dir_segments = segments[:-1]
+    if not dir_segments:
+        out = (ws / fname).resolve()
+        if not _is_under_workspace(out, ws):
+            return None, "错误：路径越出工程根目录。"
+        return str(out), ""
+
+    parent, note = resolve_under_workspace_write_chain(workspace_root, dir_segments)
+    if parent is None:
+        return None, note
+
+    full = (parent / fname).resolve()
+    if not _is_under_workspace(full, ws):
+        return None, f"错误：路径越出工程根目录：{full}"
+    if full.is_dir():
+        return None, f"错误：目标路径与已有目录冲突：{full}"
+    return str(full), note
+
+
+def resolve_write_target_directory(
+    workspace_root: str,
+    raw: str,
+    *,
+    cwd_fallback: bool = True,
+) -> Tuple[Optional[str], str]:
+    """
+    Resolve a **directory** path for mkdir (path may not exist yet).
+    """
+    _ = cwd_fallback
+    ws = Path(workspace_root).expanduser().resolve()
+    r = raw.strip()
+    if not r:
+        return None, "错误：空目录路径"
+
+    exp = Path(r).expanduser()
+    if exp.is_absolute():
+        p = exp.resolve()
+        if not _is_under_workspace(p, ws):
+            return None, f"错误：绝对路径必须在默认工程根目录内：{ws}"
+        if p.is_file():
+            return None, f"错误：路径已存在且为文件：{p}"
+        return str(p), ""
+
+    segments = _split_segments(r)
+    if not segments:
+        return str(ws), ""
+
+    path, note = resolve_under_workspace_write_chain(workspace_root, segments)
+    if path is None:
+        return None, note
+    if path.is_file():
+        return None, f"错误：目标路径已存在且为文件：{path}"
+    return str(path), note
